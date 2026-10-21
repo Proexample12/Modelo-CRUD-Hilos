@@ -4,6 +4,7 @@ import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.concurrent.Task;
 import javafx.fxml.FXML;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
@@ -23,10 +24,13 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.function.UnaryOperator;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 
 public class ClienteController {
 
+    // Controles del formulario de cliente y acciones del CRUD.
     @FXML private TextField txtNombres;
     @FXML private TextField txtApellidos;
     @FXML private TextField txtTelefono;
@@ -36,6 +40,7 @@ public class ClienteController {
     @FXML private Button btnActualizar;
     @FXML private Button btnEliminar;
 
+    // Controles de búsqueda y tabla donde se presentan los clientes.
     @FXML private TextField txtBuscar;
     @FXML private Label lblTotal;
     @FXML private TableView<Cliente> tblClientes;
@@ -46,10 +51,17 @@ public class ClienteController {
     @FXML private TableColumn<Cliente, String> colCorreo;
     @FXML private TableColumn<Cliente, String> colActivo;
 
+    // Acceso a PostgreSQL, datos observables para JavaFX y el hilo de carga.
     private final ClienteDAO clienteDAO = new ClienteDAO();
     private final ObservableList<Cliente> clientes = FXCollections.observableArrayList();
+    private final ExecutorService executor = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "carga-clientes");
+        thread.setDaemon(true);
+        return thread;
+    });
     private Cliente clienteSeleccionado;
 
+    /** Configura la pantalla una vez cargado el FXML y solicita los datos iniciales. */
     @FXML
     public void initialize() {
         configurarColumnas();
@@ -78,6 +90,7 @@ public class ClienteController {
         recargarTabla();
     }
 
+    /** Valida el formulario, revisa el correo y registra un cliente nuevo. */
     @FXML
     private void onGuardar() {
         if (!validarFormulario()) {
@@ -101,6 +114,7 @@ public class ClienteController {
         }
     }
 
+    /** Actualiza el cliente seleccionado después de validar sus datos. */
     @FXML
     private void onActualizar() {
         if (clienteSeleccionado == null) {
@@ -128,6 +142,7 @@ public class ClienteController {
         }
     }
 
+    /** Elimina el cliente seleccionado si no tiene citas asociadas y se confirma la acción. */
     @FXML
     private void onEliminar() {
         if (clienteSeleccionado == null) {
@@ -158,29 +173,45 @@ public class ClienteController {
         }
     }
 
+    /** Limpia los campos del formulario y devuelve el foco al nombre. */
     @FXML
     private void onLimpiar() {
         limpiarFormulario();
         txtNombres.requestFocus();
     }
 
+    /** Ejecuta la búsqueda usando el texto escrito por el usuario. */
     @FXML
     private void onBuscar() {
         recargarTabla();
     }
 
+    /** Borra el criterio de búsqueda y vuelve a solicitar todos los clientes. */
     @FXML
     private void onLimpiarBusqueda() {
         txtBuscar.clear();
         recargarTabla();
     }
 
-
+    /**
+     * Consulta los clientes en un hilo de fondo para que JavaFX siga respondiendo.
+     * Los manejadores de éxito y error se ejecutan en el hilo de interfaz.
+     */
     private void recargarTabla() {
         Integer idSeleccionado = clienteSeleccionado != null ? clienteSeleccionado.getIdCliente() : null;
         String texto = txtBuscar.getText() == null ? "" : txtBuscar.getText().trim();
-        try {
-            List<Cliente> lista = texto.isEmpty() ? clienteDAO.listarTodos() : clienteDAO.buscar(texto);
+        // call() corre en el ejecutor: aquí se realiza únicamente la operación JDBC.
+        Task<List<Cliente>> tarea = new Task<>() {
+            @Override
+            protected List<Cliente> call() throws SQLException {
+                return texto.isEmpty() ? clienteDAO.listarTodos() : clienteDAO.buscar(texto);
+            }
+        };
+
+        // Task notifica el resultado en el hilo JavaFX, seguro para actualizar controles.
+
+        tarea.setOnSucceeded(event -> {
+            List<Cliente> lista = tarea.getValue();
             clientes.setAll(lista);
             lblTotal.setText("Total de registros: " + lista.size());
 
@@ -190,12 +221,19 @@ public class ClienteController {
                         .findFirst()
                         .ifPresent(c -> tblClientes.getSelectionModel().select(c));
             }
-        } catch (SQLException e) {
+        });
+        // Conserva la lista actual y presenta el error si falla la consulta.
+        tarea.setOnFailed(event -> {
+            Throwable error = tarea.getException();
             AlertUtil.mostrarError("Error de base de datos",
-                    "No se pudieron cargar los clientes.\nDetalle: " + e.getMessage());
-        }
+                    "No se pudieron cargar los clientes.\nDetalle: "
+                            + (error == null ? "Error desconocido." : error.getMessage()));
+        });
+
+        executor.execute(tarea);
     }
 
+    /** Enlaza cada columna de la tabla con una propiedad del modelo Cliente. */
     private void configurarColumnas() {
         colId.setCellValueFactory(d -> new SimpleIntegerProperty(d.getValue().getIdCliente()).asObject());
         colNombres.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().getNombres()));
@@ -206,6 +244,7 @@ public class ClienteController {
     }
 
 
+    /** Copia los datos del cliente seleccionado a los campos editables. */
     private void cargarFormulario(Cliente c) {
         txtNombres.setText(c.getNombres());
         txtApellidos.setText(c.getApellidos());
@@ -214,6 +253,7 @@ public class ClienteController {
         chkActivo.setSelected(c.isActivo());
     }
 
+    /** Construye un Cliente con los valores actuales del formulario. */
     private Cliente leerFormulario() {
         return Cliente.builder()
                 .idCliente(clienteSeleccionado != null ? clienteSeleccionado.getIdCliente() : null)
@@ -225,6 +265,7 @@ public class ClienteController {
                 .build();
     }
 
+    /** Desmarca la selección y restaura el formulario a sus valores iniciales. */
     private void limpiarFormulario() {
         tblClientes.getSelectionModel().clearSelection();
         clienteSeleccionado = null;
@@ -236,6 +277,7 @@ public class ClienteController {
     }
 
 
+    /** Comprueba campos obligatorios, teléfono y formato de correo. */
     private boolean validarFormulario() {
         if (Validador.esVacio(txtNombres.getText())) {
             return invalido("Los nombres son obligatorios.", txtNombres);
@@ -258,6 +300,7 @@ public class ClienteController {
         return true;
     }
 
+    /** Muestra una advertencia, enfoca el campo indicado y devuelve false. */
     private boolean invalido(String mensaje, Control campo) {
         AlertUtil.mostrarAdvertencia("Datos inválidos", mensaje);
         campo.requestFocus();
@@ -265,6 +308,7 @@ public class ClienteController {
     }
 
 
+    /** Traduce errores SQL comunes a mensajes comprensibles para el usuario. */
     private void manejarErrorSQL(SQLException e, String accion) {
         String estado = e.getSQLState();
         if ("23505".equals(estado)) {
@@ -280,6 +324,7 @@ public class ClienteController {
     }
 
 
+    /** Limita la longitud y, opcionalmente, los caracteres aceptados en un campo. */
     private void restringir(TextField campo, int maxLongitud, String regexPermitido) {
         UnaryOperator<TextFormatter.Change> filtro = cambio -> {
             String nuevo = cambio.getControlNewText();
