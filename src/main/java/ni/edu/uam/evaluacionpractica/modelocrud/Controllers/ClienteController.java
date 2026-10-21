@@ -10,6 +10,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.Control;
 import javafx.scene.control.Label;
+import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
@@ -26,6 +27,7 @@ import java.util.Objects;
 import java.util.function.UnaryOperator;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 
 public class ClienteController {
@@ -43,6 +45,7 @@ public class ClienteController {
     // Controles de búsqueda y tabla donde se presentan los clientes.
     @FXML private TextField txtBuscar;
     @FXML private Label lblTotal;
+    @FXML private ProgressIndicator indicadorCarga;
     @FXML private TableView<Cliente> tblClientes;
     @FXML private TableColumn<Cliente, Integer> colId;
     @FXML private TableColumn<Cliente, String> colNombres;
@@ -85,6 +88,9 @@ public class ClienteController {
         btnGuardar.disableProperty().bind(sinSeleccion.not());
         btnActualizar.disableProperty().bind(sinSeleccion);
         btnEliminar.disableProperty().bind(sinSeleccion);
+        indicadorCarga.visibleProperty().addListener((obs, anterior, visible) ->
+                indicadorCarga.setManaged(visible));
+        indicadorCarga.setVisible(false);
 
         limpiarFormulario();
         recargarTabla();
@@ -204,13 +210,27 @@ public class ClienteController {
         Task<List<Cliente>> tarea = new Task<>() {
             @Override
             protected List<Cliente> call() throws SQLException {
+                try {
+                    // Pausa didáctica para que se note que la interfaz sigue respondiendo.
+                    TimeUnit.SECONDS.sleep(2);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    if (isCancelled()) {
+                        return List.of();
+                    }
+                    throw new SQLException("Se interrumpió la carga de clientes.", e);
+                }
                 return texto.isEmpty() ? clienteDAO.listarTodos() : clienteDAO.buscar(texto);
             }
         };
 
         // Task notifica el resultado en el hilo JavaFX, seguro para actualizar controles.
+        indicadorCarga.setVisible(true);
+        txtBuscar.setDisable(true);
 
         tarea.setOnSucceeded(event -> {
+            indicadorCarga.setVisible(false);
+            txtBuscar.setDisable(false);
             List<Cliente> lista = tarea.getValue();
             clientes.setAll(lista);
             lblTotal.setText("Total de registros: " + lista.size());
@@ -224,6 +244,8 @@ public class ClienteController {
         });
         // Conserva la lista actual y presenta el error si falla la consulta.
         tarea.setOnFailed(event -> {
+            indicadorCarga.setVisible(false);
+            txtBuscar.setDisable(false);
             Throwable error = tarea.getException();
             AlertUtil.mostrarError("Error de base de datos",
                     "No se pudieron cargar los clientes.\nDetalle: "

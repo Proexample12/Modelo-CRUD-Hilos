@@ -6,6 +6,7 @@
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.CheckBox?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ProgressIndicator?>
 <?import javafx.scene.control.TableColumn?>
 <?import javafx.scene.control.TableView?>
 <?import javafx.scene.control.TextField?>
@@ -89,7 +90,11 @@
                 </placeholder>
             </TableView>
 
-            <Label fx:id="lblTotal" style="-fx-text-fill: #0f766e; -fx-font-weight: bold; -fx-background-color: #d9f4ec; -fx-background-radius: 6; -fx-padding: 8 12;"/>
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label fx:id="lblTotal" HBox.hgrow="ALWAYS" style="-fx-text-fill: #0f766e; -fx-font-weight: bold; -fx-background-color: #d9f4ec; -fx-background-radius: 6; -fx-padding: 8 12;"/>
+                <ProgressIndicator fx:id="indicadorCarga" progress="-1" prefWidth="24" prefHeight="24" maxWidth="24" maxHeight="24" visible="false" managed="false" accessibleText="Cargando clientes"/>
+                <Label text="Cargando clientes..." textFill="#52647c" visible="${indicadorCarga.visible}" managed="${indicadorCarga.visible}"/>
+            </HBox>
         </VBox>
     </center>
 </BorderPane>
